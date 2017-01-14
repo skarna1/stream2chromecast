@@ -34,6 +34,7 @@ import sys, os, errno
 import signal
 
 from cc_media_controller import CCMediaController
+from convert_srt_vtt import ConvertSrt2Vtt
 import cc_device_finder
 import time
 
@@ -154,8 +155,8 @@ Additional option to specify the buffer size of the data returned from the trans
 
 PIDFILE = os.path.join(tempfile.gettempdir(), "stream2chromecast_%s.pid") 
 
-FFMPEG = 'ffmpeg %s -i "%s" -preset ultrafast -f mp4 -frag_duration 3000 -b:v 2000k -loglevel error %s -'
-AVCONV = 'avconv %s -i "%s" -preset ultrafast -f mp4 -frag_duration 3000 -b:v 2000k -loglevel error %s -'
+FFMPEG = 'ffmpeg %s -i "%s" -preset ultrafast -f %s -frag_duration 3000 -b:v 2000k -loglevel error %s -'
+AVCONV = 'avconv %s -i "%s" -preset ultrafast -f %s -frag_duration 3000 -b:v 2000k -loglevel error %s -'
 
 
 
@@ -237,10 +238,24 @@ class TranscodingRequestHandler(RequestHandler):
     bufsize = 0
                     
     def write_response(self, filepath):
+        options =""
         if self.bufsize != 0:
             print "transcode buffer size:", self.bufsize
-        
-        ffmpeg_command = self.transcoder_command % (self.transcode_input_options, filepath, self.transcode_options) 
+        if filepath.lower().endswith(".mkv"):
+            videoformat = "matroska"
+        else:
+            videoformat = "mp4"
+
+        codecs=get_codecs(filepath)
+        if "h264" in codecs or "vp8" in codecs:
+            options = " -c:v copy "
+        else:
+            options = " -c:v h264 "
+        if "ac3" in codecs:
+            options = options + " -c:a aac "
+        else:
+            options = options + " -c:a copy "
+        ffmpeg_command = self.transcoder_command % (self.transcode_input_options, filepath, videoformat, self.transcode_options + options)
         
         ffmpeg_process = subprocess.Popen(ffmpeg_command, stdout=subprocess.PIPE, shell=True, bufsize=self.bufsize)       
 
@@ -255,14 +270,17 @@ class TranscodingRequestHandler(RequestHandler):
         self.wfile.write("\r\n\r\n")
 
 
-
 class SubRequestHandler(RequestHandler):
     """ Handle HTTP requests for subtitles files """
     content_type = "text/vtt;charset=utf-8"
 
+    def write_response(self, filepath):
+        if filepath.lower().endswith(".srt"):
+            filepath = ConvertSrt2Vtt().convert_file(filepath)
+
+        return RequestHandler.write_response(self, filepath)
 
 
-            
 def get_transcoder_cmds(preferred_transcoder=None):
     """ establish which transcoder utility to use depending on what is installed """
     probe_cmd = None
@@ -401,8 +419,19 @@ def get_mimetype(filename, ffprobe_cmd=None):
         mimetype += "mp4"     
         
     return mimetype
-    
-            
+
+def get_codecs(filename, ffprobe_cmd=None):
+    _, ffprobe_cmd = get_transcoder_cmds()
+    codecs=[]
+    ffprobe_cmd = '%s -show_streams -show_format "%s" 2>1| grep codec_name' % (ffprobe_cmd, filename)
+    ffmpeg_process = subprocess.Popen(ffprobe_cmd, stdout=subprocess.PIPE, shell=True)
+
+    for line in ffmpeg_process.stdout:
+        tokens=line.split('=')
+        if len(tokens) >1:
+            codec = tokens[1]
+            codecs.append(codec.rstrip('\n'))
+    return codecs
             
 def play(filename, transcode=False, transcoder=None, transcode_options=None, transcode_input_options=None,
          transcode_bufsize=0, device_name=None, server_port=None,

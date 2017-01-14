@@ -141,7 +141,7 @@ By default, a random unused port will be selected to serve the media from. In a 
 
 
 ###Subtitles
-Only the WebVTT format is currently supported and not when transcoding.
+Only the SRT and WebVTT formats are currently supported and not when transcoding.
 
  - to cast the subtitles on /path/to/subtitles.vtt
 
